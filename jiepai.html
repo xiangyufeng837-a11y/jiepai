@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>专业电子节拍器</title>
+    <style>
+        :root {
+            --primary-color: #007AFF;   /* 弱拍颜色（蓝） */
+            --accent-color: #FF9500;    /* 强拍颜色（橙） */
+            --bg-color: #1c1c1e;
+            --text-color: #ffffff;
+            --panel-bg: #2c2c2e;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            user-select: none; /* 防止双击选中文字 */
+        }
+
+        /* 视觉指示器 */
+        .beat-indicator {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background-color: #333;
+            margin-bottom: 40px;
+            transition: background-color 0.05s, transform 0.05s;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: bold;
+            color: rgba(255,255,255,0.2);
+        }
+
+        /* 弱拍动画 */
+        .beat-indicator.active {
+            background-color: var(--primary-color);
+            box-shadow: 0 0 50px var(--primary-color);
+            transform: scale(1.05);
+            color: white;
+        }
+
+        /* 强拍动画 */
+        .beat-indicator.active.strong {
+            background-color: var(--accent-color);
+            box-shadow: 0 0 60px var(--accent-color);
+            transform: scale(1.1);
+        }
+
+        .controls {
+            background-color: var(--panel-bg);
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            width: 85%;
+            max-width: 400px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .bpm-display {
+            font-size: 4.5rem;
+            font-weight: bold;
+            line-height: 1;
+            font-variant-numeric: tabular-nums; /* 数字等宽，防止跳动 */
+        }
+
+        .bpm-label {
+            color: #888;
+            font-size: 0.9rem;
+            margin-bottom: 25px;
+            display: block;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* 拍号选择器样式 */
+        .beat-select-container {
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        select {
+            background-color: #444;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 8px;
+            font-size: 1rem;
+            outline: none;
+            cursor: pointer;
+        }
+
+        input[type=range] {
+            width: 100%;
+            margin: 25px 0;
+            cursor: pointer;
+            accent-color: var(--primary-color);
+        }
+
+        .btn-wrapper {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+
+        button {
+            border: none;
+            cursor: pointer;
+            transition: all 0.1s;
+        }
+
+        .btn-start {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 15px 0;
+            width: 100%;
+            border-radius: 12px;
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-top: 20px;
+        }
+
+        .btn-start.playing {
+            background-color: #ff3b30;
+        }
+
+        .btn-adjust {
+            background-color: #444;
+            color: white;
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .btn-adjust:active { background-color: #666; }
+    </style>
+</head>
+<body>
+
+    <div class="beat-indicator" id="beatLight">1</div>
+
+    <div class="controls">
+        <div class="bpm-display" id="bpmValue">120</div>
+        <span class="bpm-label">BPM</span>
+
+        <div class="beat-select-container">
+            <span style="color:#aaa">拍号:</span>
+            <select id="beatSelect" onchange="resetCounter()">
+                <option value="1">无重音</option>
+                <option value="2">2/4 拍</option>
+                <option value="3">3/4 拍</option>
+                <option value="4" selected>4/4 拍</option>
+                <option value="6">6/8 拍</option>
+            </select>
+        </div>
+
+        <div class="btn-wrapper">
+            <button class="btn-adjust" onclick="changeBpm(-1)">−</button>
+            <input type="range" id="bpmSlider" min="30" max="250" value="120">
+            <button class="btn-adjust" onclick="changeBpm(1)">+</button>
+        </div>
+
+        <button class="btn-start" id="startBtn">开始</button>
+    </div>
+
+    <script>
+        let bpm = 120;
+        let isPlaying = false;
+        let timer = null;
+        let audioContext = null;
+        
+        // 新增变量：当前拍数计数器
+        let currentBeat = 0; 
+        let beatsPerMeasure = 4;
+
+        const bpmDisplay = document.getElementById('bpmValue');
+        const bpmSlider = document.getElementById('bpmSlider');
+        const startBtn = document.getElementById('startBtn');
+        const beatLight = document.getElementById('beatLight');
+        const beatSelect = document.getElementById('beatSelect');
+
+        // 更新界面
+        function updateDisplay() {
+            bpmDisplay.innerText = bpm;
+            bpmSlider.value = bpm;
+        }
+
+        function changeBpm(amount) {
+            let newBpm = bpm + amount;
+            if (newBpm >= 30 && newBpm <= 250) {
+                bpm = newBpm;
+                updateDisplay();
+                if (isPlaying) {
+                    restartMetronome();
+                }
+            }
+        }
+
+        bpmSlider.addEventListener('input', function() {
+            bpm = parseInt(this.value);
+            bpmDisplay.innerText = bpm;
+            if (isPlaying) {
+                restartMetronome();
+            }
+        });
+
+        // 监听拍号改变
+        beatSelect.addEventListener('change', function() {
+            beatsPerMeasure = parseInt(this.value);
+            resetCounter();
+        });
+
+        // 重置计数器（当停止或切换拍号时）
+        function resetCounter() {
+            currentBeat = 0;
+            beatLight.innerText = 1; 
+            // 如果正在播放，立即让下一次点击从第一拍开始（可选，这里为了流畅性不做强制打断，仅重置逻辑计数）
+            if(!isPlaying) {
+                beatLight.classList.remove('active', 'strong');
+            }
+        }
+
+        // 核心播放函数
+        function playClick() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            const osc = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            // --- 逻辑判断：强拍 vs 弱拍 ---
+            // 拍号选"1"时，永远没有重音
+            let isStrongBeat = (beatsPerMeasure > 1) && (currentBeat % beatsPerMeasure === 0);
+            
+            // 1. 设置频率（音高）
+            if (isStrongBeat) {
+                osc.frequency.value = 1200; // 强拍：高音 (叮)
+            } else {
+                osc.frequency.value = 800;  // 弱拍：低音 (笃)
+            }
+
+            // 2. 视觉反馈
+            // 更新圆圈里的数字 (显示 1, 2, 3, 4...)
+            let visualNumber = (currentBeat % beatsPerMeasure) + 1;
+            if(beatsPerMeasure === 1) visualNumber = "-"; // 这是一个美学选择
+            beatLight.innerText = visualNumber;
+
+            // 添加动画类
+            if (isStrongBeat) {
+                beatLight.classList.add('active', 'strong');
+            } else {
+                beatLight.classList.add('active');
+            }
+
+            // 100ms 后移除动画类，形成闪烁效果
+            setTimeout(() => {
+                beatLight.classList.remove('active', 'strong');
+            }, 100);
+
+            // 3. 播放声音
+            osc.start();
+            // 强拍稍微响一点点，弱拍衰减快一点
+            gainNode.gain.setValueAtTime(isStrongBeat ? 1 : 0.8, audioContext.currentTime); 
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.1);
+            osc.stop(audioContext.currentTime + 0.1);
+
+            // 计数加一
+            currentBeat++;
+        }
+
+        function restartMetronome() {
+            clearInterval(timer);
+            // 重新计算间隔
+            const interval = 60000 / bpm;
+            timer = setInterval(playClick, interval);
+        }
+
+        function startMetronome() {
+            currentBeat = 0; // 每次重新开始都从第1拍起
+            playClick(); // 立即播放第一声
+            const interval = 60000 / bpm;
+            timer = setInterval(playClick, interval);
+            
+            isPlaying = true;
+            startBtn.innerText = "停止";
+            startBtn.classList.add('playing');
+        }
+
+        function stopMetronome() {
+            clearInterval(timer);
+            isPlaying = false;
+            startBtn.innerText = "开始";
+            startBtn.classList.remove('playing');
+            resetCounter();
+        }
+
+        startBtn.addEventListener('click', function() {
+            if (isPlaying) {
+                stopMetronome();
+            } else {
+                startMetronome();
+            }
+        });
+    </script>
+</body>
+</html>
